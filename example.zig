@@ -23,7 +23,7 @@ pub fn main() !void {
 
     while (true) {
         // We use os.MSG.DONTWAIT so the socket returns WouldBlock if no data is present
-        const bytes = os.recv(socket, &read_buf, os.MSG.DONTWAIT) catch |err|
+        const bytes = std.posix.recv(socket, &read_buf, std.posix.MSG.DONTWAIT) catch |err|
             if (err == error.WouldBlock) 0 else return err;
         var rest = read_buf[0..bytes];
         while (true) {

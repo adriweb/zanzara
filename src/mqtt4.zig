@@ -170,7 +170,7 @@ pub fn Client(config: ClientConfig) type {
 
             if (self.keepalive) |keepalive| {
                 const now = time.Instant.now() catch unreachable;
-                if (now.since(self.last_outgoing_instant) > @intCast(u64, keepalive) * time.ns_per_s) {
+                if (now.since(self.last_outgoing_instant) > @as(u64, @intCast(keepalive)) * time.ns_per_s) {
                     self.pingReq() catch |err|
                         return Event{ .consumed = 0, .data = .{ .err = err } };
                 }
@@ -191,8 +191,8 @@ pub fn Client(config: ClientConfig) type {
 
                         const type_and_flags: u8 = rest[0];
                         consumed += 1;
-                        self.packet_type = @intToEnum(PacketType, @intCast(u4, type_and_flags >> 4));
-                        self.flags = @intCast(u4, type_and_flags & 0b1111);
+                        self.packet_type = @enumFromInt(@as(u4, @intCast(type_and_flags >> 4)));
+                        self.flags = @as(u4, @intCast(type_and_flags & 0b1111));
                         self.state = .parse_remaining_length;
                     },
 
@@ -225,7 +225,7 @@ pub fn Client(config: ClientConfig) type {
                     .accumulate_message => {
                         if (rest.len >= self.remaining_length) {
                             // We completed the message
-                            mem.copy(u8, self.in_buffer, rest[0..self.remaining_length]);
+                            mem.copyForwards(u8, self.in_buffer, rest[0..self.remaining_length]);
                             consumed += self.remaining_length;
 
                             // Reset the in memory at the next round
@@ -246,9 +246,9 @@ pub fn Client(config: ClientConfig) type {
                             };
                         } else {
                             // Not enough data for us, take what it's there and stay in this state
-                            mem.copy(u8, self.in_buffer, rest);
+                            mem.copyForwards(u8, self.in_buffer, rest);
                             consumed += rest.len;
-                            self.remaining_length -= @intCast(u32, rest.len);
+                            self.remaining_length -= @intCast(rest.len);
                         }
                     },
 
@@ -260,7 +260,7 @@ pub fn Client(config: ClientConfig) type {
                             self.state = .parse_type_and_flags;
                         } else {
                             consumed += rest.len;
-                            self.remaining_length -= @intCast(u32, rest.len);
+                            self.remaining_length -= @intCast(rest.len);
                         }
                     },
                 }
@@ -283,7 +283,7 @@ pub fn Client(config: ClientConfig) type {
         }
 
         fn pubRec(self: *Self, packet_id: u16) !void {
-            var ptrToLast = try self.pending_pubrecs.addOne();
+            const ptrToLast = try self.pending_pubrecs.addOne();
             ptrToLast.* = packet_id;
 
             const pkt = .{ .packet_id = packet_id };
@@ -312,7 +312,7 @@ pub fn Client(config: ClientConfig) type {
         fn getPacketId(self: *Self) u16 {
             // TODO: this currently doesn't handle the fact that the client id is not allowed
             // to be 0 by the spec
-            return @atomicRmw(u16, &self.packet_id, .Add, 1, .Monotonic);
+            return @atomicRmw(u16, &self.packet_id, .Add, 1, .monotonic);
         }
 
         fn handlePacket(self: *Self, pkt: Packet) EventData {
@@ -361,7 +361,7 @@ pub fn Client(config: ClientConfig) type {
         }
 
         fn pendingPubRecIndex(self: Self, packet_id: u16) ?usize {
-            for (self.pending_pubrecs.constSlice()) |id, i| {
+            for (self.pending_pubrecs.constSlice(), 0..) |id, i| {
                 if (id == packet_id) return i;
             }
 

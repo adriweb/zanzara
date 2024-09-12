@@ -61,20 +61,20 @@ pub const Packet = union(PacketType) {
             .connack => {
                 const ack_flags = try reader.readByte();
                 const session_present = if ((ack_flags & 1) != 0) true else false;
-                const return_code = @intToEnum(ConnAck.ReturnCode, try reader.readByte());
+                const return_code = @as(ConnAck.ReturnCode, @enumFromInt(try reader.readByte()));
                 const connack = .{ .session_present = session_present, .return_code = return_code };
                 return Packet{ .connack = connack };
             },
             .publish => {
                 const retain = (flags & 0b0001) == 1;
-                const qos_int: u2 = @intCast(u2, @shrExact(flags & 0b0110, 1));
+                const qos_int: u2 = @intCast(@shrExact(flags & 0b0110, 1));
                 if (qos_int > 2) {
                     return error.InvalidQoS;
                 }
-                const qos = @intToEnum(QoS, qos_int);
+                const qos = @as(QoS, @enumFromInt(qos_int));
                 const duplicate = @shrExact(flags & 0b1000, 3) == 1;
 
-                const topic_length = try reader.readIntBig(u16);
+                const topic_length = try reader.readInt(u16, .big);
                 const topic_start = try fis.getPos();
                 const topic_end = topic_start + topic_length;
                 const topic = buffer[topic_start..topic_end];
@@ -82,7 +82,7 @@ pub const Packet = union(PacketType) {
 
                 const packet_id = switch (qos) {
                     QoS.qos0 => null,
-                    QoS.qos1, QoS.qos2 => try reader.readIntBig(u16),
+                    QoS.qos1, QoS.qos2 => try reader.readInt(u16, .big),
                 };
 
                 const payload_start = try fis.getPos();
@@ -99,27 +99,27 @@ pub const Packet = union(PacketType) {
                 return Packet{ .publish = publish };
             },
             .puback => {
-                const packet_id = try reader.readIntBig(u16);
+                const packet_id = try reader.readInt(u16, .big);
                 const puback = .{ .packet_id = packet_id };
                 return Packet{ .puback = puback };
             },
             .pubrec => {
-                const packet_id = try reader.readIntBig(u16);
+                const packet_id = try reader.readInt(u16, .big);
                 const pubrec = .{ .packet_id = packet_id };
                 return Packet{ .pubrec = pubrec };
             },
             .pubrel => {
-                const packet_id = try reader.readIntBig(u16);
+                const packet_id = try reader.readInt(u16, .big);
                 const pubrel = .{ .packet_id = packet_id };
                 return Packet{ .pubrel = pubrel };
             },
             .pubcomp => {
-                const packet_id = try reader.readIntBig(u16);
+                const packet_id = try reader.readInt(u16, .big);
                 const pubcomp = .{ .packet_id = packet_id };
                 return Packet{ .pubcomp = pubcomp };
             },
             .suback => {
-                const packet_id = try reader.readIntBig(u16);
+                const packet_id = try reader.readInt(u16, .big);
                 const return_codes_start = try fis.getPos();
                 const return_codes = mem.bytesAsSlice(SubAck.ReturnCode, buffer[return_codes_start..]);
 
@@ -130,11 +130,11 @@ pub const Packet = union(PacketType) {
                 return Packet{ .suback = suback };
             },
             .unsuback => {
-                const packet_id = try reader.readIntBig(u16);
+                const packet_id = try reader.readInt(u16, .big);
                 const unsuback = .{ .packet_id = packet_id };
                 return Packet{ .unsuback = unsuback };
             },
-            .pingresp => return Packet{ .pingresp = .{} },
+            .pingresp => return .pingresp,
             // We only handle server -> client packets
             else => return error.UnhandledPacket,
         }
@@ -181,7 +181,7 @@ pub const Packet = union(PacketType) {
         const remaining_length = packet_id_only_packet_remaining_length;
         const header_flags: u4 = 0;
         try writeFixedHeader(writer, packet_type, header_flags, remaining_length);
-        try writer.writeIntBig(u16, packet_id);
+        try writer.writeInt(u16, packet_id, .big);
     }
 
     fn serializeEmptyPacket(packet_type: PacketType, buffer: []u8) !void {
@@ -280,15 +280,15 @@ pub const Connect = struct {
         const flags = Flags{
             .clean_session = self.clean_session,
             .will_flag = self.will != null,
-            .will_qos = @enumToInt(will_qos),
+            .will_qos = @intFromEnum(will_qos),
             .will_retain = will_retain,
             .password_flag = self.password != null,
             .username_flag = self.username != null,
         };
-        const flags_byte = @bitCast(u8, flags);
+        const flags_byte = @as(u8, @bitCast(flags));
         try writer.writeByte(flags_byte);
 
-        try writer.writeIntBig(u16, self.keepalive);
+        try writer.writeInt(u16, self.keepalive, .big);
 
         try writeMqttString(writer, self.client_id);
 
@@ -335,7 +335,7 @@ pub const Publish = struct {
     const Self = @This();
 
     pub fn remainingLength(self: Self) u32 {
-        var length: u32 = serializedMqttStringLength(self.topic) + @intCast(u32, self.payload.len);
+        const length: u32 = serializedMqttStringLength(self.topic) + @as(u32, @intCast(self.payload.len));
 
         switch (self.qos) {
             QoS.qos0 => return length, // No packet id
@@ -349,9 +349,9 @@ pub const Publish = struct {
 
         const remaining_length = self.remainingLength();
         const header_flags: u4 =
-            @intCast(u4, @boolToInt(self.retain)) |
-            @shlExact(@intCast(u4, @enumToInt(self.qos)), 1) |
-            @shlExact(@intCast(u4, @boolToInt(self.duplicate)), 3);
+            @as(u4, @intFromBool(self.retain)) |
+            @shlExact(@as(u4, @intFromEnum(self.qos)), 1) |
+            @shlExact(@as(u4, @intFromBool(self.duplicate)), 3);
 
         try writeFixedHeader(writer, .publish, header_flags, remaining_length);
         try writeMqttString(writer, self.topic);
@@ -359,7 +359,7 @@ pub const Publish = struct {
             QoS.qos0 => {}, // No packet id
             QoS.qos1, QoS.qos2 => {
                 if (self.packet_id) |packet_id| {
-                    try writer.writeIntBig(u16, packet_id);
+                    try writer.writeInt(u16, packet_id, .big);
                 } else {
                     return error.MissingPacketId;
                 }
@@ -415,10 +415,10 @@ pub const Subscribe = struct {
         const remaining_length = self.remainingLength();
         const header_flags: u4 = 0b0010; // MQTT v3.1.1 spec section 3.8.1
         try writeFixedHeader(writer, .subscribe, header_flags, remaining_length);
-        try writer.writeIntBig(u16, self.packet_id);
+        try writer.writeInt(u16, self.packet_id, .big);
         for (self.topics) |topic| {
             try writeMqttString(writer, topic.topic_filter);
-            try writer.writeIntBig(u8, @enumToInt(topic.qos));
+            try writer.writeInt(u8, @intFromEnum(topic.qos), .big);
         }
     }
 };
@@ -459,7 +459,7 @@ pub const Unsubscribe = struct {
         const remaining_length = self.remainingLength();
         const header_flags: u4 = 0b0010; // MQTT v3.1.1 spec section 3.10.1
         try writeFixedHeader(writer, .unsubscribe, header_flags, remaining_length);
-        try writer.writeIntBig(u16, self.packet_id);
+        try writer.writeInt(u16, self.packet_id, .big);
         for (self.topic_filters) |topic_filter| {
             try writeMqttString(writer, topic_filter);
         }
@@ -471,7 +471,7 @@ pub const UnsubAck = struct {
 };
 
 fn serializedMqttStringLength(s: []const u8) u16 {
-    return @intCast(u16, s.len) + 2;
+    return @as(u16, @intCast(s.len)) + 2;
 }
 
 fn serializedFixedHeaderLength(remaining_length: usize) !usize {
@@ -488,19 +488,19 @@ fn serializedFixedHeaderLength(remaining_length: usize) !usize {
 }
 
 fn writeMqttString(writer: anytype, s: []const u8) !void {
-    const length = @intCast(u16, s.len);
-    try writer.writeIntBig(u16, length);
+    const length = @as(u16, @intCast(s.len));
+    try writer.writeInt(u16, length, .big);
     try writer.writeAll(s);
 }
 
 fn writeFixedHeader(writer: anytype, packet_type: PacketType, flags: u4, remaining_length: u32) !void {
-    const type_and_flags: u8 = @shlExact(@intCast(u8, @enumToInt(packet_type)), 4) | flags;
+    const type_and_flags: u8 = @shlExact(@as(u8, @intFromEnum(packet_type)), 4) | flags;
     try writer.writeByte(type_and_flags);
     var value: u32 = remaining_length;
     const max_bytes = @sizeOf(u32);
     var i: u8 = 0;
     while (i < max_bytes) : (i += 1) {
-        var byte: u8 = @intCast(u8, value % 128);
+        var byte: u8 = @intCast(value % 128);
         value /= 128;
         if (value > 0) {
             byte |= 128;
