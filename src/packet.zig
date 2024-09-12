@@ -26,10 +26,7 @@ pub const PacketType = enum(u4) {
     disconnect,
 };
 
-pub const ParseError = error{
-    InvalidQoS,
-    UnhandledPacket,
-};
+pub const ParseError = error{ InvalidQoS, UnhandledPacket, InvalidTopicLength };
 
 pub const Packet = union(PacketType) {
     connect: Connect,
@@ -77,6 +74,9 @@ pub const Packet = union(PacketType) {
                 const topic_length = try reader.readInt(u16, .big);
                 const topic_start = try fis.getPos();
                 const topic_end = topic_start + topic_length;
+                if (topic_end >= buffer.len) {
+                    return error.InvalidTopicLength;
+                }
                 const topic = buffer[topic_start..topic_end];
                 try fis.seekBy(topic_length);
 
